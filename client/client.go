@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"bitbucket.org/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/common"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

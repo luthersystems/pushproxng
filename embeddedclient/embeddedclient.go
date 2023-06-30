@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"bitbucket.org/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/common"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"bitbucket.org/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/common"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
