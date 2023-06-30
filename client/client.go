@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -25,9 +25,9 @@ const (
 func run() {
 	viper.SetEnvPrefix("pushproxng_client")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.BindEnv("proxy")
-	viper.BindEnv("fqdn")
-	viper.BindEnv("target")
+	_ = viper.BindEnv("proxy")
+	_ = viper.BindEnv("fqdn")
+	_ = viper.BindEnv("target")
 
 	proxy := viper.GetString("proxy")
 	fqdn := viper.GetString("fqdn")
@@ -58,7 +58,7 @@ func run() {
 			pause()
 			continue
 		}
-		respPollBytes, err := ioutil.ReadAll(respPoll.Body)
+		respPollBytes, err := io.ReadAll(respPoll.Body)
 		respPoll.Body.Close()
 		if err != nil {
 			log(err)
@@ -155,13 +155,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file")
 
 	rootCmd.Flags().String("proxy", "invalid", "Proxy address")
-	viper.BindPFlag("proxy", rootCmd.Flags().Lookup("proxy"))
+	_ = viper.BindPFlag("proxy", rootCmd.Flags().Lookup("proxy"))
 
 	rootCmd.Flags().String("fqdn", "invalid", "FQDN")
-	viper.BindPFlag("fqdn", rootCmd.Flags().Lookup("fqdn"))
+	_ = viper.BindPFlag("fqdn", rootCmd.Flags().Lookup("fqdn"))
 
 	rootCmd.Flags().String("target", "invalid", "Target address")
-	viper.BindPFlag("target", rootCmd.Flags().Lookup("target"))
+	_ = viper.BindPFlag("target", rootCmd.Flags().Lookup("target"))
 }
 
 func initConfig() {
