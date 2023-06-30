@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"time"
 
-	"bitbucket.org/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/common"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -48,7 +48,7 @@ func Work(proxy string, fqdn string) {
 			pause()
 			continue
 		}
-		respPollBytes, err := ioutil.ReadAll(respPoll.Body)
+		respPollBytes, err := io.ReadAll(respPoll.Body)
 		respPoll.Body.Close()
 		if err != nil {
 			log(err)

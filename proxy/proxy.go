@@ -7,14 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"bitbucket.org/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/common"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -202,7 +202,7 @@ func (s *State) InterlockMacroAwaitReply(ctx context.Context, fqdn string, id st
 func run() {
 	viper.SetEnvPrefix("pushproxng_proxy")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.BindEnv("listen")
+	_ = viper.BindEnv("listen")
 
 	listenAddress := viper.GetString("listen")
 
@@ -251,7 +251,7 @@ func run() {
 
 	if err := http.ListenAndServe(listenAddress, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/poll" {
-			jsonBytes, err := ioutil.ReadAll(r.Body)
+			jsonBytes, err := io.ReadAll(r.Body)
 			if err != nil {
 				log(err)
 				return
@@ -294,7 +294,7 @@ func run() {
 				return
 			}
 		} else if r.URL.Path == "/push" {
-			jsonBytes, err := ioutil.ReadAll(r.Body)
+			jsonBytes, err := io.ReadAll(r.Body)
 			if err != nil {
 				log(err)
 				return
@@ -373,7 +373,7 @@ func run() {
 			}
 		} else if r.URL.Path == "/probe" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("+OK"))
+			_, _ = w.Write([]byte("+OK"))
 		} else {
 			fmt.Printf("http serve unknown: '%s'\n", r.URL.Path)
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -407,7 +407,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file")
 
 	rootCmd.Flags().String("listen", ":8080", "Listen address")
-	viper.BindPFlag("listen", rootCmd.Flags().Lookup("listen"))
+	_ = viper.BindPFlag("listen", rootCmd.Flags().Lookup("listen"))
 }
 
 func initConfig() {
