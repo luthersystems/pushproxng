@@ -10,6 +10,8 @@ jobs:
   build-push:
     name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
     runs-on: ${{ fromJSON('{"arm64":"buildjet-2vcpu-ubuntu-2204-arm","amd64":"ubuntu-20.04"}')[matrix.arch] }}
+    container:
+      image: luthersystems/build-go:v0.0.68
     strategy:
       matrix:
         arch:
