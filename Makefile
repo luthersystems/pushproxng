@@ -18,7 +18,7 @@ go-test:
 	${GO_TEST_TIMEOUT_10} ./...
 
 proxy/proxy:
-	GOOS=linux go build -tags netgo -ldflags '-w -extldflags "-static"' -o ./build/proxy ./proxy
+	GOOS=linux go build -buildvcs=false -tags netgo -ldflags '-w -extldflags "-static"' -o ./build/proxy ./proxy
 
 .PHONY: clean
 clean:
