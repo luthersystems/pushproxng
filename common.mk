@@ -10,10 +10,6 @@ GIT_REVISION ?= $(shell git rev-parse --short HEAD)
 VERSION ?= $(if $(strip $(GIT_TAG)),$(GIT_TAG),$(GIT_REVISION))
 BUILD_VERSION ?= ${VERSION}${TAG_SUFFIX}
 
-GO_PKG_VOLUME=${PROJECT}-build-gopath-pkg
-GO_PKG_PATH=/go/pkg
-GO_PKG_MOUNT=$(if $(CI),-v $(PWD)/build/pkg:${GO_PKG_PATH},--mount='type=volume,source=${GO_PKG_VOLUME},destination=${GO_PKG_PATH}')
-
 GO_TEST_BASE=go test ${GO_TEST_FLAGS}
 GO_TEST_TIMEOUT_10=${GO_TEST_BASE} -timeout 10m
 

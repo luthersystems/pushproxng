@@ -1,11 +1,13 @@
-name: CI Build
-
+name: Build Release and Push
 on:
-  pull_request:
-    branches:
-      - main
+  push:
+    tags:
+    - '*'
+env:
+  DOCKERHUB_TOKEN:  ${{ secrets.DOCKERHUB_TOKEN }}
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 jobs:
-  build:
+  build-push:
     name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
     runs-on: ${{ fromJSON('{"arm64":"buildjet-2vcpu-ubuntu-2204-arm","amd64":"ubuntu-20.04"}')[matrix.arch] }}
     container:
@@ -21,11 +23,22 @@ jobs:
       - uses: actions/checkout@v3.5.0
         with:
           fetch-depth: 0 # include tags for VERSION detection
-      - name: Run CI
-        run: make citest
       - name: Build container
         uses: ./.github/actions/build-docker-images
         with:
           arch: ${{ matrix.arch }}
           image: .
-          git_rev: $GITHUB_SHA
+          git_tag: $GITHUB_REF_NAME
+  push-manifests:
+    runs-on: ubuntu-20.04
+    needs:
+    - build-push
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3.5.0
+    - name:  Configure DockerHub
+      uses: ./.github/actions/configure-dockerhub
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    - name: Create and push manifest for multiarch
+      run:  make push-manifests GIT_TAG=$GITHUB_REF_NAME
