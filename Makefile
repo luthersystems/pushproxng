@@ -40,7 +40,7 @@ static: ${STATIC_IMAGE_DUMMY}
 push: ${FQ_STATIC_IMAGE_DUMMY}
 	@
 
-build-%: LOADARG=$(ifpushprox$(findstring $*,${LOCALARCH}),--load)
+build-%: LOADARG=$(if $(findstring $*,${LOCALARCH}),--load)
 build-%: Dockerfile proxy/proxy
 	${DOCKER} buildx build \
 		--platform linux/$* \
