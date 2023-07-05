@@ -1,15 +1,29 @@
-name: CI Test
+name: CI Build
 
 on:
   pull_request:
     branches:
       - main
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    container:
-      image: luthersystems/build-go:v0.0.68
+  build:
+    name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
+    runs-on: ${{ fromJSON('{"arm64":"buildjet-2vcpu-ubuntu-2204-arm","amd64":"ubuntu-20.04"}')[matrix.arch] }}
+    strategy:
+      matrix:
+        arch:
+          - amd64
+          - arm64
+        image:
+          - pushprox
     steps:
-    - uses: actions/checkout@v3.5.0
-    - name: Run CI
-      run: make citest
+      - uses: actions/checkout@v3.5.0
+        with:
+          fetch-depth: 0 # include tags for VERSION detection
+      - name: Run CI
+        run: make citest
+      - name: Build container
+        uses: ./.github/actions/build-docker-images
+        with:
+          arch: ${{ matrix.arch }}
+          image: .
+          git_rev: $GITHUB_SHA
