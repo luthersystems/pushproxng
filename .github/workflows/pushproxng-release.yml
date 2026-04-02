@@ -9,7 +9,7 @@ env:
 jobs:
   build-push:
     name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
-    runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-20.04"}')[matrix.arch] }}
+    runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-22.04"}')[matrix.arch] }}
     container:
       image: luthersystems/build-go:v0.0.68
     strategy:
@@ -30,7 +30,7 @@ jobs:
           image: .
           git_tag: $GITHUB_REF_NAME
   push-manifests:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs:
     - build-push
     steps:
