@@ -3,10 +3,6 @@ on:
   push:
     tags:
     - '*'
-env:
-  # Docker Home OIDC connection ID for .github/actions/configure-dockerhub
-  # (a repository variable, not a secret).
-  DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
 jobs:
   build-push:
     permissions:
