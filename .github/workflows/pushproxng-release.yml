@@ -3,11 +3,11 @@ on:
   push:
     tags:
     - '*'
-env:
-  DOCKERHUB_TOKEN:  ${{ secrets.DOCKERHUB_TOKEN }}
-  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 jobs:
   build-push:
+    permissions:
+      contents: read
+      id-token: write # Docker Hub OIDC login
     name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
     runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-22.04"}')[matrix.arch] }}
     container:
@@ -25,11 +25,15 @@ jobs:
           fetch-depth: 0 # include tags for VERSION detection
       - name: Build container
         uses: ./.github/actions/build-docker-images
+        timeout-minutes: 60 # the Docker Hub OIDC token lasts 60 minutes
         with:
           arch: ${{ matrix.arch }}
           image: .
           git_tag: $GITHUB_REF_NAME
   push-manifests:
+    permissions:
+      contents: read
+      id-token: write # Docker Hub OIDC login
     runs-on: ubuntu-22.04
     needs:
     - build-push
@@ -42,3 +46,4 @@ jobs:
       uses: docker/setup-buildx-action@v4
     - name: Create and push manifest for multiarch
       run:  make push-manifests GIT_TAG=$GITHUB_REF_NAME
+      timeout-minutes: 60
