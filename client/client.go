@@ -59,7 +59,7 @@ func run() {
 			continue
 		}
 		respPollBytes, err := io.ReadAll(respPoll.Body)
-		respPoll.Body.Close()
+		_ = respPoll.Body.Close()
 		if err != nil {
 			log(err)
 			pause()
@@ -101,6 +101,10 @@ func run() {
 
 		var responseBytes bytes.Buffer
 		err = response.Write(&responseBytes)
+		// Write reads the body but does not close it; an open body
+		// keeps the connection to the target from going back to the
+		// pool, so each scrape would leak a connection.
+		_ = response.Body.Close()
 		if err != nil {
 			log(err)
 			pause()
@@ -125,7 +129,7 @@ func run() {
 			pause()
 			continue
 		}
-		respPush.Body.Close()
+		_ = respPush.Body.Close()
 	}
 
 	os.Exit(1)

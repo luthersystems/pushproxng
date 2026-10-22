@@ -49,7 +49,7 @@ func Work(proxy string, fqdn string) {
 			continue
 		}
 		respPollBytes, err := io.ReadAll(respPoll.Body)
-		respPoll.Body.Close()
+		_ = respPoll.Body.Close()
 		if err != nil {
 			log(err)
 			pause()
@@ -113,6 +113,6 @@ func Work(proxy string, fqdn string) {
 			pause()
 			continue
 		}
-		respPush.Body.Close()
+		_ = respPush.Body.Close()
 	}
 }

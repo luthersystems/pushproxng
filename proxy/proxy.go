@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -199,19 +200,34 @@ func (s *State) InterlockMacroAwaitReply(ctx context.Context, fqdn string, id st
 	return &ret, nil
 }
 
-func run() {
-	viper.SetEnvPrefix("pushproxng_proxy")
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	_ = viper.BindEnv("listen")
+// Limits for the proxy's HTTP server. A poll is a long poll: the proxy
+// holds it until a scrape request comes in or the client goes away, so the
+// server has no write timeout. The header timeout stops a client that
+// opens a connection and never sends a request from holding it open
+// (Slowloris), and the body limits stop one large request from using all
+// the memory of the proxy.
+const (
+	readHeaderTimeout = 10 * time.Second
+	idleTimeout       = 2 * time.Minute
+	// maxPollBytes bounds a /poll body: a small JSON object.
+	maxPollBytes = 1 << 20
+	// maxPushBytes bounds a /push body: a hex-encoded scrape response,
+	// twice the size of the metrics page it carries.
+	maxPushBytes = 64 << 20
+)
 
-	listenAddress := viper.GetString("listen")
+// gcAge is how long the proxy keeps a scrape. A scrape that no client
+// answers in this time is dropped, and its /metrics caller gets 503.
+const gcAge = 5 * time.Minute
 
-	s := NewState()
+func logError(err error) {
+	fmt.Printf("encountered: %s\n", err)
+}
 
-	log := (func(err error) {
-		fmt.Printf("encountered: %s\n", err)
-	})
-
+// startBackground starts the goroutines that the state needs: the pulser,
+// which wakes every waiter once a second so that a waiter whose request
+// context has ended can return, and the GC, which drops old scrapes.
+func startBackground(s *State) {
 	// pulser thread
 	go (func() {
 		for {
@@ -225,14 +241,12 @@ func run() {
 
 	// GC thread
 	go (func() {
-		fiveMinutes := 5 * time.Minute
-
 		for {
 			err := s.Interlock(context.Background(), (func() bool {
 				for _, fqdn := range s.fqdn {
 					keep := make([]*Scrape, 0)
 					for _, scrape := range fqdn.scrapes {
-						if time.Since(scrape.started) < fiveMinutes {
+						if time.Since(scrape.started) < gcAge {
 							keep = append(keep, scrape)
 						} else {
 							s.mutated++
@@ -243,34 +257,55 @@ func run() {
 				return true
 			}))
 			if err != nil {
-				log(err)
+				logError(err)
 			}
-			time.Sleep(fiveMinutes)
+			time.Sleep(gcAge)
 		}
 	})()
+}
 
-	if err := http.ListenAndServe(listenAddress, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/poll" {
-			jsonBytes, err := io.ReadAll(r.Body)
-			if err != nil {
-				log(err)
+// readBody reads at most limit bytes of the request body. It answers 413
+// and returns false when the body is larger, and 400 on another read error.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		}
+		logError(err)
+		return nil, false
+	}
+	return b, true
+}
+
+// newHandler returns the proxy's HTTP handler over the state s. It is
+// separate from run so that tests can serve it with httptest.
+func newHandler(s *State) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/poll":
+			jsonBytes, ok := readBody(w, r, maxPollBytes)
+			if !ok {
 				return
 			}
 			var ag1 common.PollRequest
-			err = json.Unmarshal(jsonBytes, &ag1)
+			err := json.Unmarshal(jsonBytes, &ag1)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				log(err)
+				logError(err)
 				return
 			}
 			err = s.InterlockMacroPostLaunched(r.Context(), ag1.FQDN, ag1.Launched)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
 			values, err := s.InterlockMacroAwaitRequest(r.Context(), ag1.FQDN, ag1.Launched)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
 			if values.superseded {
@@ -285,59 +320,61 @@ func run() {
 			out, err := json.Marshal(ag2)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-				log(err)
+				logError(err)
 				return
 			}
 			_, err = w.Write(out)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
-		} else if r.URL.Path == "/push" {
-			jsonBytes, err := io.ReadAll(r.Body)
-			if err != nil {
-				log(err)
+		case "/push":
+			jsonBytes, ok := readBody(w, r, maxPushBytes)
+			if !ok {
 				return
 			}
 			var ag1 common.PushRequest
-			err = json.Unmarshal(jsonBytes, &ag1)
+			err := json.Unmarshal(jsonBytes, &ag1)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				log(err)
+				logError(err)
 				return
 			}
 			response, err := hex.DecodeString(ag1.Response)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				log(err)
+				logError(err)
 				return
 			}
 			err = s.InterlockMacroPostPush(r.Context(), ag1.FQDN, ag1.UUID, response)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
 			// success basically as long as the JSON parsed
 			w.WriteHeader(http.StatusOK)
-		} else if r.URL.Path == "/metrics" {
-			fqdn := strings.Split(r.URL.Host, ":")[0]
+		case "/metrics":
+			// Prometheus sends the scrape as a proxy request, so the
+			// URL holds the host of the target. Hostname drops the
+			// port, also for a bracketed IPv6 address.
+			fqdn := r.URL.Hostname()
 			var requestBytes bytes.Buffer
 			r.Header.Del("Accept-Encoding")
 			err := r.Write(&requestBytes)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				log(err)
+				logError(err)
 				return
 			}
 			id := uuid.New().String()
 			err = s.InterlockMacroPostRequest(r.Context(), fqdn, time.Now(), id, requestBytes.Bytes())
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
 			values, err := s.InterlockMacroAwaitReply(r.Context(), fqdn, id)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
 			if values.lost {
@@ -359,7 +396,7 @@ func run() {
 			}
 			req, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET / HTTP/1.1\r\n" + string(lines[1]) + "\r\n\r\n")))
 			if err != nil {
-				log(err)
+				logError(err)
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
@@ -368,18 +405,39 @@ func run() {
 			}
 			_, err = w.Write(body)
 			if err != nil {
-				log(err)
+				logError(err)
 				return
 			}
-		} else if r.URL.Path == "/probe" {
+		case "/probe":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("+OK"))
-		} else {
-			fmt.Printf("http serve unknown: '%s'\n", r.URL.Path)
+		default:
+			// %q, so a path with a newline cannot forge a log line.
+			fmt.Printf("http serve unknown: %q\n", r.URL.Path)
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		}
-	})); err != nil {
-		log(err)
+	})
+}
+
+func run() {
+	viper.SetEnvPrefix("pushproxng_proxy")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	_ = viper.BindEnv("listen")
+
+	listenAddress := viper.GetString("listen")
+
+	s := NewState()
+	startBackground(s)
+
+	srv := &http.Server{
+		Addr:              listenAddress,
+		Handler:           newHandler(s),
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+	if err := srv.ListenAndServe(); err != nil {
+		logError(err)
+		os.Exit(1)
 	}
 }
 
