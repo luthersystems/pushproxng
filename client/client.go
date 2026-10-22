@@ -1,25 +1,15 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/luthersystems/pushproxng/common"
+	"github.com/luthersystems/pushproxng/internal/agent"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-)
-
-const (
-	mimeTypeJSON = "application/json"
 )
 
 func run() {
@@ -33,100 +23,12 @@ func run() {
 	fqdn := viper.GetString("fqdn")
 	target := viper.GetString("target")
 
-	log := (func(err error) {
-		fmt.Printf("encountered: %s\n", err)
-	})
-
-	pause := (func() {
-		time.Sleep(30 * time.Second)
-	})
-
-	launched := time.Now().Unix()
-
-	for {
-		ag1 := &common.PollRequest{FQDN: fqdn, Launched: int(launched)}
-
-		inp1, err := json.Marshal(ag1)
-		if err != nil {
-			log(err)
-			break
-		}
-
-		respPoll, err := http.Post(fmt.Sprintf("http://%s/poll", proxy), mimeTypeJSON, bytes.NewReader(inp1))
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-		respPollBytes, err := io.ReadAll(respPoll.Body)
-		respPoll.Body.Close()
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
-		var ag2 common.PollReply
-		err = json.Unmarshal(respPollBytes, &ag2)
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
-		requestBytes, err := hex.DecodeString(ag2.Request)
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
-		request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestBytes)))
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
+	_ = agent.Run(proxy, fqdn, func(request *http.Request) (*http.Response, error) {
 		request.URL.Scheme = "http"
 		request.URL.Host = target
 		request.RequestURI = ""
-
-		response, err := (&http.Client{}).Do(request)
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
-		var responseBytes bytes.Buffer
-		err = response.Write(&responseBytes)
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-
-		ag3 := &common.PushRequest{
-			FQDN:     fqdn,
-			UUID:     ag2.UUID,
-			Response: hex.EncodeToString(responseBytes.Bytes()),
-		}
-
-		inp3, err := json.Marshal(ag3)
-		if err != nil {
-			log(err)
-			break
-		}
-
-		respPush, err := http.Post(fmt.Sprintf("http://%s/push", proxy), mimeTypeJSON, bytes.NewReader(inp3))
-		if err != nil {
-			log(err)
-			pause()
-			continue
-		}
-		respPush.Body.Close()
-	}
+		return http.DefaultClient.Do(request)
+	})
 
 	os.Exit(1)
 }

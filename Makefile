@@ -7,7 +7,7 @@ FQ_STATIC_IMAGE_DUMMY=$(call PUSH_DUMMY,${FQ_STATIC_IMAGE}/${BUILD_VERSION})
 FQ_MANIFEST_DUMMY=$(call MANIFEST_DUMMY,${FQ_STATIC_IMAGE}/${BUILD_VERSION})
 
 HWTYPE=$(shell uname -m)
-LOCALARCH=$(if $(findstring ${HWTYPE},"x86_64"),amd64,${HWTYPE})
+LOCALARCH=$(if $(filter x86_64,${HWTYPE}),amd64,$(if $(filter aarch64 arm64,${HWTYPE}),arm64,${HWTYPE}))
 
 .PHONY: default
 default: static
@@ -20,17 +20,32 @@ static-checks:
 go-test:
 	${GO_TEST_TIMEOUT_10} ./...
 
-proxy/proxy:
-	GOOS=linux go build -buildvcs=false -tags netgo -ldflags '-w -extldflags "-static"' -o ./build/proxy ./proxy
+# Every input of the image build. The image dummy below depends on them,
+# so an edit (committed or not) rebuilds the image for the same VERSION.
+GO_SOURCES:=$(shell find . -name '*.go' -not -path './.git/*')
+IMAGE_INPUTS=Dockerfile .dockerignore go.mod go.sum ${GO_SOURCES}
 
 .PHONY: clean
 clean:
 	rm -rf build
-	rm -fr proxy/proxy
+
+# govulncheck reports only vulnerabilities the code can reach, in the Go
+# standard library and the modules, for the Go in go.mod's toolchain line.
+GOVULNCHECK_VERSION=v1.9.0
+
+.PHONY: govulncheck
+govulncheck:
+	./scripts/govulncheck.sh ${GOVULNCHECK_VERSION}
 
 .PHONY: citest
-citest: static-checks go-test
+citest: static-checks go-test govulncheck
 	@
+
+# Check the image this checkout builds for the local architecture against
+# the build-harden policies (scripts/check-harden.sh).
+.PHONY: check-harden
+check-harden: static
+	./scripts/check-harden.sh ${STATIC_IMAGE}:${VERSION} linux/${LOCALARCH}
 
 .PHONY: static
 static: ${STATIC_IMAGE_DUMMY}
@@ -41,15 +56,15 @@ push: ${FQ_STATIC_IMAGE_DUMMY}
 	@
 
 build-%: LOADARG=$(if $(findstring $*,${LOCALARCH}),--load)
-build-%: Dockerfile proxy/proxy
+build-%: ${IMAGE_INPUTS}
 	${DOCKER} buildx build \
 		--platform linux/$* \
 		${LOADARG} \
 		-t ${STATIC_IMAGE}:${VERSION} \
 		.
 
-${STATIC_IMAGE_DUMMY}:
-	make build-${LOCALARCH}
+${STATIC_IMAGE_DUMMY}: ${IMAGE_INPUTS}
+	$(MAKE) build-${LOCALARCH}
 	${MKDIR_P} $(dir $@)
 	${TOUCH} $@
 

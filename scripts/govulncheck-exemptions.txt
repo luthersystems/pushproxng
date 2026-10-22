@@ -1,0 +1,11 @@
+# Vulnerabilities that scripts/govulncheck.sh does not fail on.
+#
+# Why: govulncheck fails CI on any vulnerability the code can reach, and
+# release-tag.yml releases only a main commit whose CI push run passed. A
+# Go standard library advisory that no Go release fixes yet would then stop
+# every release, also the one that ships the fix once it comes. Add a line
+# only when the fix is out of this repo's hands, with an expiry and an issue;
+# an expired line exempts nothing.
+#
+# Format, one per line: ID | EXPIRES (YYYY-MM-DD) | ISSUE | REASON
+# Example (not active): GO-2099-0001 | 2099-01-31 | luthersystems/pushproxng#1 | stdlib fix not released

@@ -4,28 +4,54 @@ on:
   pull_request:
     branches:
       - main
+  # release-tag.yml releases only a main commit whose push run of this
+  # workflow passed, so it must run on push to main too.
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
-    runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-22.04"}')[matrix.arch] }}
+  test:
+    name: lint, test, govulncheck
+    runs-on: ubuntu-22.04
+    # The buildenv release the image builds with, so CI lints and tests with
+    # the same Go (1.26.10) and golangci-lint (2.13.2). The image runs as the
+    # non-root user build; the runner's workspace belongs to root, so the job
+    # runs as root.
     container:
-      image: luthersystems/build-go:v0.0.68
+      image: luthersystems/build-go:v0.1.45@sha256:f3628ebd1f36eb2c91fb91818c98c4657cd7eb79eaceef509b8530ab5642fe88
+      options: --user root
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run CI
+        run: make citest GO_TEST_FLAGS=-race
+
+  image:
+    name: pushprox - ${{ matrix.arch }} docker build
+    # Native runners for each architecture: the image check reads the image
+    # on the host, and a native build needs no emulation. The job runs on the
+    # host, not in a container, because the build needs docker buildx and
+    # the check needs openssl, which the host has.
+    runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-22.04"}')[matrix.arch] }}
     strategy:
       matrix:
         arch:
           - amd64
           - arm64
-        image:
-          - pushprox
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # include tags for VERSION detection
-      - name: Run CI
-        run: make citest
-      - name: Build container
+          persist-credentials: false
+      - name: Build and check container
         uses: ./.github/actions/build-docker-images
+        timeout-minutes: 60
         with:
           arch: ${{ matrix.arch }}
           image: .
-          git_rev: $GITHUB_SHA
+          git_rev: ${{ github.sha }}
