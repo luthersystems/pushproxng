@@ -7,7 +7,7 @@ FQ_STATIC_IMAGE_DUMMY=$(call PUSH_DUMMY,${FQ_STATIC_IMAGE}/${BUILD_VERSION})
 FQ_MANIFEST_DUMMY=$(call MANIFEST_DUMMY,${FQ_STATIC_IMAGE}/${BUILD_VERSION})
 
 HWTYPE=$(shell uname -m)
-LOCALARCH=$(if $(findstring ${HWTYPE},"x86_64"),amd64,${HWTYPE})
+LOCALARCH=$(if $(filter x86_64,${HWTYPE}),amd64,$(if $(filter aarch64 arm64,${HWTYPE}),arm64,${HWTYPE}))
 
 .PHONY: default
 default: static
@@ -20,17 +20,21 @@ static-checks:
 go-test:
 	${GO_TEST_TIMEOUT_10} ./...
 
-proxy/proxy:
-	GOOS=linux go build -buildvcs=false -tags netgo -ldflags '-w -extldflags "-static"' -o ./build/proxy ./proxy
+GO_SOURCES=$(call GIT_LS_FILES,'*.go')
 
 .PHONY: clean
 clean:
 	rm -rf build
-	rm -fr proxy/proxy
 
 .PHONY: citest
 citest: static-checks go-test
 	@
+
+# Check the image this checkout builds for the local architecture against
+# the build-harden policies (scripts/check-harden.sh).
+.PHONY: check-harden
+check-harden: static
+	./scripts/check-harden.sh ${STATIC_IMAGE}:${VERSION} linux/${LOCALARCH}
 
 .PHONY: static
 static: ${STATIC_IMAGE_DUMMY}
@@ -41,7 +45,7 @@ push: ${FQ_STATIC_IMAGE_DUMMY}
 	@
 
 build-%: LOADARG=$(if $(findstring $*,${LOCALARCH}),--load)
-build-%: Dockerfile proxy/proxy
+build-%: Dockerfile go.mod go.sum ${GO_SOURCES}
 	${DOCKER} buildx build \
 		--platform linux/$* \
 		${LOADARG} \

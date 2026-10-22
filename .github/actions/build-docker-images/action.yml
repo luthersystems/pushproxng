@@ -60,8 +60,18 @@ runs:
     - name: Build docker image for ${{ inputs.arch }}
       shell: bash
       run: |
-        TARGET=""
-        if [[ -n "${{ inputs.git_tag }}" ]]; then
-          TARGET="push"
-        fi
-        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} $TARGET
+        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} static
+
+    # Check the built image before anything is pushed: the final stage must
+    # run the build-harden kit last, and no distrusted root CA may be trusted
+    # anywhere in the image (scripts/check-harden.sh).
+    - name: Verify build-harden
+      shell: bash
+      run: |
+        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} check-harden
+
+    - name: Push docker image for ${{ inputs.arch }}
+      if: inputs.git_tag != ''
+      shell: bash
+      run: |
+        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} push
