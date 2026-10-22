@@ -22,7 +22,7 @@ go-test:
 
 # Every input of the image build. The image dummy below depends on them,
 # so an edit (committed or not) rebuilds the image for the same VERSION.
-GO_SOURCES=$(shell find . -name '*.go' -not -path './.git/*')
+GO_SOURCES:=$(shell find . -name '*.go' -not -path './.git/*')
 IMAGE_INPUTS=Dockerfile .dockerignore go.mod go.sum ${GO_SOURCES}
 
 .PHONY: clean
