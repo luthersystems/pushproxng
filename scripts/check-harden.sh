@@ -20,9 +20,12 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 kit=$(sed -n 's/^FROM \(luthersystems\/build-harden[^ ]*\) AS harden$/\1/p' "$root/Dockerfile")
 [ -n "$kit" ] || { echo "check-harden.sh: no build-harden stage in Dockerfile" >&2; exit 1; }
 
+# The trap is set before docker create, so a failed pull still removes
+# the work directory.
 work=$(mktemp -d)
+cid=""
+trap '[ -z "$cid" ] || docker rm -f "$cid" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 cid=$(docker create "$kit" /nonexistent)
-trap 'docker rm -f "$cid" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 docker cp "$cid:/harden" "$work/harden"
 
 if ! command -v openssl >/dev/null; then

@@ -20,7 +20,10 @@ static-checks:
 go-test:
 	${GO_TEST_TIMEOUT_10} ./...
 
-GO_SOURCES=$(call GIT_LS_FILES,'*.go')
+# Every input of the image build. The image dummy below depends on them,
+# so an edit (committed or not) rebuilds the image for the same VERSION.
+GO_SOURCES=$(shell find . -name '*.go' -not -path './.git/*')
+IMAGE_INPUTS=Dockerfile .dockerignore go.mod go.sum ${GO_SOURCES}
 
 .PHONY: clean
 clean:
@@ -32,7 +35,7 @@ GOVULNCHECK_VERSION=v1.9.0
 
 .PHONY: govulncheck
 govulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+	./scripts/govulncheck.sh ${GOVULNCHECK_VERSION}
 
 .PHONY: citest
 citest: static-checks go-test govulncheck
@@ -53,15 +56,15 @@ push: ${FQ_STATIC_IMAGE_DUMMY}
 	@
 
 build-%: LOADARG=$(if $(findstring $*,${LOCALARCH}),--load)
-build-%: Dockerfile go.mod go.sum ${GO_SOURCES}
+build-%: ${IMAGE_INPUTS}
 	${DOCKER} buildx build \
 		--platform linux/$* \
 		${LOADARG} \
 		-t ${STATIC_IMAGE}:${VERSION} \
 		.
 
-${STATIC_IMAGE_DUMMY}:
-	make build-${LOCALARCH}
+${STATIC_IMAGE_DUMMY}: ${IMAGE_INPUTS}
+	$(MAKE) build-${LOCALARCH}
 	${MKDIR_P} $(dir $@)
 	${TOUCH} $@
 

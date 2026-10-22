@@ -17,8 +17,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -tags netgo \
 FROM luthersystems/service-base-alpine:v0.1.45@sha256:45e7d2a2f7cf115872862ece632c2057993ebff4f72c696e0bf18d77db9dece3
 # The base runs as nobody; the kit needs root. USER nobody is set again below.
 USER root
-COPY --from=build /out/proxy /opt/proxy
-WORKDIR /opt
+# /usr/local/bin, not /opt: the base declares VOLUME /opt, and under Docker
+# a kept anonymous volume would keep serving an old binary after an upgrade.
+COPY --from=build /out/proxy /usr/local/bin/proxy
 
 # Run the build-harden kit last. It removes the distrusted root CAs (the
 # eMudhra/emSign roots) from every trust store in the image. Keep it the LAST
@@ -28,5 +29,5 @@ WORKDIR /opt
 RUN --mount=type=bind,from=harden,source=/harden,target=/harden sh /harden/harden.sh
 
 USER nobody
-ENTRYPOINT [ "tini", "--", "/opt/proxy" ]
+ENTRYPOINT [ "tini", "--", "/usr/local/bin/proxy" ]
 CMD [ "--listen=:8080" ]

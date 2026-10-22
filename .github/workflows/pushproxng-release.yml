@@ -51,5 +51,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
       - name: Create and push manifest for multiarch
-        run: make push-manifests GIT_TAG=${{ github.ref_name }}
+        # The tag reaches make through env, not ${{ }} in the script, so a
+        # tag name cannot inject shell code.
+        env:
+          GIT_TAG_IN: ${{ github.ref_name }}
+        run: make push-manifests GIT_TAG="$GIT_TAG_IN"
         timeout-minutes: 60
