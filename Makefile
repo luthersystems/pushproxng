@@ -26,8 +26,16 @@ GO_SOURCES=$(call GIT_LS_FILES,'*.go')
 clean:
 	rm -rf build
 
+# govulncheck reports only vulnerabilities the code can reach, in the Go
+# standard library and the modules, for the Go in go.mod's toolchain line.
+GOVULNCHECK_VERSION=v1.9.0
+
+.PHONY: govulncheck
+govulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+
 .PHONY: citest
-citest: static-checks go-test
+citest: static-checks go-test govulncheck
 	@
 
 # Check the image this checkout builds for the local architecture against

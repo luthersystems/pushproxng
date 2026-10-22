@@ -1,5 +1,10 @@
 name: Build Docker Images
-description: A custom action to build Docker images for specified platforms and images
+description: >-
+  Build the image for one architecture on a runner of that architecture,
+  check it with the build-harden kit, and push it when git_tag is set. The
+  caller checks out the commit to build first (a local action cannot run
+  before a checkout), so this action does not check out again: a second
+  checkout would build the event's commit, not the one the caller chose.
 inputs:
   arch:
     description: The platform architecture
@@ -17,9 +22,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v5
-
     - name: Install Docker (ARM runners)
       if: runner.arch == 'ARM64'
       shell: bash
@@ -46,7 +48,7 @@ runs:
         $SUDO chmod 666 /var/run/docker.sock
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
       with:
         platforms: linux/${{ inputs.arch }}
 
@@ -57,21 +59,38 @@ runs:
       if: inputs.git_tag != ''
       uses: ./.github/actions/configure-dockerhub
 
+    # The inputs reach make through the environment, not through ${{ }} in
+    # the script, so a tag name cannot inject shell code.
     - name: Build docker image for ${{ inputs.arch }}
       shell: bash
+      env:
+        IMAGE_DIR: ${{ inputs.image }}
+        ARCH: ${{ inputs.arch }}
+        GIT_TAG_IN: ${{ inputs.git_tag }}
+        GIT_REV_IN: ${{ inputs.git_rev }}
       run: |
-        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} static
+        cd "$IMAGE_DIR" && make PLATFORMS="linux/$ARCH" TAG_SUFFIX="-$ARCH" GIT_TAG="$GIT_TAG_IN" GIT_REVISION="$GIT_REV_IN" static
 
     # Check the built image before anything is pushed: the final stage must
     # run the build-harden kit last, and no distrusted root CA may be trusted
     # anywhere in the image (scripts/check-harden.sh).
     - name: Verify build-harden
       shell: bash
+      env:
+        IMAGE_DIR: ${{ inputs.image }}
+        ARCH: ${{ inputs.arch }}
+        GIT_TAG_IN: ${{ inputs.git_tag }}
+        GIT_REV_IN: ${{ inputs.git_rev }}
       run: |
-        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} check-harden
+        cd "$IMAGE_DIR" && make PLATFORMS="linux/$ARCH" TAG_SUFFIX="-$ARCH" GIT_TAG="$GIT_TAG_IN" GIT_REVISION="$GIT_REV_IN" check-harden
 
     - name: Push docker image for ${{ inputs.arch }}
       if: inputs.git_tag != ''
       shell: bash
+      env:
+        IMAGE_DIR: ${{ inputs.image }}
+        ARCH: ${{ inputs.arch }}
+        GIT_TAG_IN: ${{ inputs.git_tag }}
+        GIT_REV_IN: ${{ inputs.git_rev }}
       run: |
-        cd ${{ inputs.image }} && make PLATFORMS=linux/${{ inputs.arch }} TAG_SUFFIX=-${{ inputs.arch }} GIT_TAG=${{ inputs.git_tag }} GIT_REVISION=${{ inputs.git_rev }} push
+        cd "$IMAGE_DIR" && make PLATFORMS="linux/$ARCH" TAG_SUFFIX="-$ARCH" GIT_TAG="$GIT_TAG_IN" GIT_REVISION="$GIT_REV_IN" push
