@@ -47,7 +47,8 @@ const gcAge = 5 * time.Minute
 // scrape lives at most gcAge+gcInterval.
 const gcInterval = time.Minute
 
-func logError(err error) {
+// LogError logs err in the proxy's format.
+func LogError(err error) {
 	fmt.Printf("encountered: %s\n", err)
 }
 
@@ -108,7 +109,7 @@ func Start(ctx context.Context, s *State) {
 				return true
 			}))
 			if err != nil && ctx.Err() == nil {
-				logError(err)
+				LogError(err)
 			}
 		}
 	})()
@@ -136,7 +137,7 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 		} else {
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		}
-		logError(err)
+		LogError(err)
 		return nil, false
 	}
 	_ = rc.SetReadDeadline(time.Time{})
@@ -156,17 +157,17 @@ func Handler(s *State) http.Handler {
 			err := json.Unmarshal(jsonBytes, &ag1)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				logError(err)
+				LogError(err)
 				return
 			}
 			err = s.InterlockMacroPostLaunched(r.Context(), ag1.FQDN, ag1.Launched)
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 			values, err := s.InterlockMacroAwaitRequest(r.Context(), ag1.FQDN, ag1.Launched)
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 			if values.superseded {
@@ -181,12 +182,12 @@ func Handler(s *State) http.Handler {
 			out, err := json.Marshal(ag2)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-				logError(err)
+				LogError(err)
 				return
 			}
 			_, err = w.Write(out)
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 		case "/push":
@@ -198,18 +199,18 @@ func Handler(s *State) http.Handler {
 			err := json.Unmarshal(jsonBytes, &ag1)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				logError(err)
+				LogError(err)
 				return
 			}
 			response, err := hex.DecodeString(ag1.Response)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				logError(err)
+				LogError(err)
 				return
 			}
 			err = s.InterlockMacroPostPush(r.Context(), ag1.FQDN, ag1.UUID, response)
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 			// success basically as long as the JSON parsed
@@ -219,23 +220,42 @@ func Handler(s *State) http.Handler {
 			// URL holds the host of the target. Hostname drops the
 			// port, also for a bracketed IPv6 address.
 			fqdn := r.URL.Hostname()
+			// A scrape is a GET with no body, but read any body
+			// with the same limit and deadline as a poll, so a large
+			// or slow body cannot use memory or hold the connection.
+			reqBody, ok := readBody(w, r, MaxPollBytes)
+			if !ok {
+				return
+			}
+			// http.NoBody when empty: Request.Write sends a
+			// non-nil empty body as chunked, which a GET to the
+			// target must not get.
+			r.Body = http.NoBody
+			if len(reqBody) > 0 {
+				r.Body = io.NopCloser(bytes.NewReader(reqBody))
+			}
 			var requestBytes bytes.Buffer
 			r.Header.Del("Accept-Encoding")
 			err := r.Write(&requestBytes)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-				logError(err)
+				LogError(err)
 				return
 			}
 			id := uuid.New().String()
 			err = s.InterlockMacroPostRequest(r.Context(), fqdn, time.Now(), id, requestBytes.Bytes())
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 			values, err := s.InterlockMacroAwaitReply(r.Context(), fqdn, id)
 			if err != nil {
-				logError(err)
+				// The caller went away. Drop its scrape with a fresh
+				// context: r.Context() has ended.
+				if derr := s.InterlockMacroDropScrape(context.Background(), fqdn, id); derr != nil {
+					LogError(derr)
+				}
+				LogError(err)
 				return
 			}
 			if values.lost {
@@ -257,7 +277,7 @@ func Handler(s *State) http.Handler {
 			}
 			req, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET / HTTP/1.1\r\n" + string(lines[1]) + "\r\n\r\n")))
 			if err != nil {
-				logError(err)
+				LogError(err)
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
@@ -266,7 +286,7 @@ func Handler(s *State) http.Handler {
 			}
 			_, err = w.Write(body)
 			if err != nil {
-				logError(err)
+				LogError(err)
 				return
 			}
 		case "/probe":

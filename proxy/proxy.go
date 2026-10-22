@@ -23,7 +23,7 @@ func run() {
 	proxyserver.Start(context.Background(), s)
 
 	if err := proxyserver.NewServer(listenAddress, s).ListenAndServe(); err != nil {
-		fmt.Printf("encountered: %s\n", err)
+		proxyserver.LogError(err)
 		os.Exit(1)
 	}
 }

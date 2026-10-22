@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -144,6 +145,62 @@ func TestDeliveredScrapeFreed(t *testing.T) {
 	}
 	if n := len(s.fqdn["f"].scrapes); n != 0 {
 		t.Fatalf("%d scrapes left after delivery, want 0", n)
+	}
+}
+
+// TestAbandonedScrapeDropped checks that a scrape leaves the state when
+// its /metrics caller goes away, so no client runs it and no unread
+// response is kept.
+func TestAbandonedScrapeDropped(t *testing.T) {
+	proxy, s := newTestProxy(t)
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prom := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://gone.example/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := prom.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("scrape with no client returned %d, want a timeout", resp.StatusCode)
+	}
+	// The handler notices within a pulse (1 s) and drops the scrape.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var n int
+		_ = s.Interlock(context.Background(), func() bool {
+			n = len(s.EnsureFQDN("gone.example").scrapes)
+			return true
+		})
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d scrapes left after the caller went away", n)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestMetricsBodyLimit(t *testing.T) {
+	proxy, _ := newTestProxy(t)
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prom := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	body := bytes.Repeat([]byte("a"), MaxPollBytes+1)
+	resp, err := prom.Post("http://big.example/metrics", "text/plain", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413", resp.StatusCode)
 	}
 }
 

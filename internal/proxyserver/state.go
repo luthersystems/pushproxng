@@ -8,6 +8,7 @@ package proxyserver
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -174,9 +175,10 @@ func (s *State) InterlockMacroAwaitReply(ctx context.Context, fqdn string, id st
 					ret.response = scrape.response
 					// Drop the scrape as soon as its response is
 					// delivered. Kept until the GC, every delivered
-					// response (up to maxPushBytes/2 each) would stay
-					// in memory for up to two GC periods.
-					entry.scrapes = append(entry.scrapes[:i], entry.scrapes[i+1:]...)
+					// response (up to MaxPushBytes/2 each) would stay
+					// in memory until it runs. slices.Delete also
+					// clears the freed slot of the backing array.
+					entry.scrapes = slices.Delete(entry.scrapes, i, i+1)
 					s.mutated++
 					return true
 				}
@@ -190,4 +192,22 @@ func (s *State) InterlockMacroAwaitReply(ctx context.Context, fqdn string, id st
 		return nil, err
 	}
 	return &ret, nil
+}
+
+// InterlockMacroDropScrape removes the scrape id of fqdn, if it is still
+// there. The /metrics handler calls it when its caller goes away (a
+// Prometheus scrape timeout), so that no client runs the scrape and no
+// response nobody reads is kept until the GC.
+func (s *State) InterlockMacroDropScrape(ctx context.Context, fqdn string, id string) error {
+	return s.Interlock(ctx, (func() bool {
+		entry := s.EnsureFQDN(fqdn)
+		for i, scrape := range entry.scrapes {
+			if scrape.uuid == id {
+				entry.scrapes = slices.Delete(entry.scrapes, i, i+1)
+				s.mutated++
+				break
+			}
+		}
+		return true
+	}))
 }
