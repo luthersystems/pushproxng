@@ -1,49 +1,55 @@
 name: Build Release and Push
+
+# Builds, checks and pushes the multi-arch luthersystems/pushprox image for a
+# release tag. release-tag.yml cuts the release with the Claude App token, so
+# the tag push starts this workflow; a person who pushes a v* tag by hand
+# starts it the same way.
 on:
   push:
     tags:
-    - '*'
+      - 'v*'
+
+permissions: {}
+
 jobs:
   build-push:
     permissions:
       contents: read
       id-token: write # Docker Hub OIDC login
-    name: ${{ matrix.image }} - ${{ matrix.arch }} docker build
+    name: pushprox - ${{ matrix.arch }} docker build
     runs-on: ${{ fromJSON('{"arm64":"2vcpu-ubuntu-2204-arm","amd64":"ubuntu-22.04"}')[matrix.arch] }}
-    container:
-      image: luthersystems/build-go:v0.0.68
     strategy:
       matrix:
         arch:
           - amd64
           - arm64
-        image:
-          - pushprox
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # include tags for VERSION detection
-      - name: Build container
+          persist-credentials: false
+      - name: Build, check and push container
         uses: ./.github/actions/build-docker-images
         timeout-minutes: 60 # the Docker Hub OIDC token lasts 60 minutes
         with:
           arch: ${{ matrix.arch }}
           image: .
-          git_tag: $GITHUB_REF_NAME
+          git_tag: ${{ github.ref_name }}
   push-manifests:
     permissions:
       contents: read
       id-token: write # Docker Hub OIDC login
     runs-on: ubuntu-22.04
     needs:
-    - build-push
+      - build-push
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v5
-    - name:  Configure DockerHub
-      uses: ./.github/actions/configure-dockerhub
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
-    - name: Create and push manifest for multiarch
-      run:  make push-manifests GIT_TAG=$GITHUB_REF_NAME
-      timeout-minutes: 60
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure DockerHub
+        uses: ./.github/actions/configure-dockerhub
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - name: Create and push manifest for multiarch
+        run: make push-manifests GIT_TAG=${{ github.ref_name }}
+        timeout-minutes: 60
