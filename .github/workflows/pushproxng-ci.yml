@@ -14,8 +14,35 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether the build and test jobs must run (scripts/ci-changes.sh).
+  changes:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+    steps:
+      # A pull request checks out the merge commit. Its first parent is the
+      # base branch tip, so depth 2 is enough for the diff.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Test the decision script and the gate's needs list
+        run: ./scripts/ci-changes-test.sh
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            ./scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
+          else
+            ./scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: lint, test, govulncheck
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
     runs-on: ubuntu-22.04
     # The buildenv release the image builds with, so CI lints and tests with
     # the same Go (1.26.10) and golangci-lint (2.13.2). The image runs as the
@@ -33,6 +60,8 @@ jobs:
 
   image:
     name: pushprox - ${{ matrix.arch }} docker build
+    needs: changes
+    if: needs.changes.outputs.code != 'false'
     # Native runners for each architecture: the image check reads the image
     # on the host, and a native build needs no emulation. The job runs on the
     # host, not in a container, because the build needs docker buildx and
@@ -55,3 +84,34 @@ jobs:
           arch: ${{ matrix.arch }}
           image: .
           git_rev: ${{ github.sha }}
+
+  # The one check main's ruleset requires for this workflow. Requiring each
+  # job by name would not work: the image matrix makes one check per arch,
+  # so the ruleset's list would drift with the matrix. always(), so the gate
+  # reports on every run: a gate that is skipped (as !cancelled() would
+  # leave it on a cancelled run) counts as passing for a required check.
+  ci-all:
+    name: CI (all required checks)
+    if: always()
+    needs: [changes, test, image]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      # Pass only if the changes job succeeded and every other job succeeded,
+      # or was skipped because the changes job said the PR is docs-only
+      # (code=false). Any other skip fails, so a job skipped by mistake
+      # cannot pass the gate.
+      - name: Fail unless every required job passed
+        if: >-
+          needs.changes.result != 'success'
+          || contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || (needs.changes.outputs.code != 'false' && contains(needs.*.result, 'skipped'))
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON"
+          echo "::error::A required CI job failed, was cancelled or was skipped."
+          exit 1
+      - name: Every required job passed or was skipped as docs-only
+        run: echo "ok"
