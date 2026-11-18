@@ -27,7 +27,10 @@ func run() {
 		request.URL.Scheme = "http"
 		request.URL.Host = target
 		request.RequestURI = ""
-		return http.DefaultClient.Do(request)
+		// The proxy sends scrape requests here, and the client forwards each
+		// one to the target the operator configured. Forwarding to a URL that
+		// came from the network is the client's job, so G704 does not apply.
+		return http.DefaultClient.Do(request) //nolint:gosec // G704: see above
 	})
 
 	os.Exit(1)
