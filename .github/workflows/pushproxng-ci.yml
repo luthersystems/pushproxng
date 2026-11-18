@@ -45,11 +45,11 @@ jobs:
     if: needs.changes.outputs.code != 'false'
     runs-on: ubuntu-22.04
     # The buildenv release the image builds with, so CI lints and tests with
-    # the same Go (1.26.10) and golangci-lint (2.13.2). The image runs as the
+    # the same Go (1.27.4) and golangci-lint (2.13.2). The image runs as the
     # non-root user build; the runner's workspace belongs to root, so the job
     # runs as root.
     container:
-      image: luthersystems/build-go:v0.1.45@sha256:f3628ebd1f36eb2c91fb91818c98c4657cd7eb79eaceef509b8530ab5642fe88
+      image: luthersystems/build-go:v0.1.60@sha256:699e3406416fd53818296f17b1398250601822bdce7911b346d4d2dc2c9c6a7c
       options: --user root
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

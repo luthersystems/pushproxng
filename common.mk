@@ -1,7 +1,7 @@
 PROJECT=pushproxng
 PROJECT_PATH=github.com/luthersystems/${PROJECT}
 
-BUILDENV_TAG=v0.1.45
+BUILDENV_TAG=v0.1.60
 BUILD_IMAGE_GO=luthersystems/build-go:${BUILDENV_TAG}
 
 TAG_SUFFIX ?= -amd64
